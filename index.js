@@ -13,13 +13,19 @@
  * limitations under the License.
  */
 
+/* 
+Updated the plugin to handle data provided by Ecowitt Wttboy sensor. 
+Additionally removed true wind conversion as neither sensor has speed and direction data to calculate true wind.
+Apparent wind is provided to signalk to be used by derived-data plugin.
+*/
+
 module.exports = function (app) {
   var plugin = {};
   var server;
 
   plugin.id = 'signalk-ecowitt';
-  plugin.name = 'SignalK Ecowitt GW1000';
-  plugin.description = 'This plugin allows you to receve data from Ecowitt GW1000 wireless gateways';
+  plugin.name = 'SignalK Ecowitt GW1000 and GW2000';
+  plugin.description = 'This plugin allows you to receve data from Ecowitt GW1000 and GW2000 wireless gateways';
 
   function inhg2pascal(inhg) {
     return (Math.round(inhg*3386));
@@ -37,6 +43,11 @@ module.exports = function (app) {
     return (Math.round(s*0.44704*100)/100);
   }
 
+   function inch2mm(i) {
+    return (Math.round(i*2.54));
+  }
+
+
   plugin.start = function (options, restartPlugin) {
     var http = require('http');
     var qs = require('querystring');
@@ -51,31 +62,74 @@ module.exports = function (app) {
         req.on("end", function(){
           var q = qs.parse(body);
           res.end();
-
           var tempin = fahrenheit2kelvin (parseFloat (q.tempinf));
           var humidityin = parseFloat(q.humidityin)/100;
-          var pressure = inhg2pascal (parseFloat (q.baromabsin));
+          var baromrelin = inhg2pascal(parseFloat(q.baromrelin));
+          var baromabsin = inhg2pascal(parseFloat(q.baromabsin));
+          var tempout = fahrenheit2kelvin(parseFloat (q.tempf));
+          var humidityout = parseFloat(q.humidity)/100;
+          var solarradiationout = parseFloat(q.solarradiation);
+          var uvout = parseFloat(q.uv);
+          var rrain_piezoout = inch2mm(parseFloat(q.rrain_piezo));
+          var drain_piezoout = inch2mm(parseFloat(q.drain_piezo));
+
 
           var values = [
             {
-              path: 'environment.inside.temperature',
+              path: 'environment.ecowitt.inside.temperature',
               value: tempin
             },
             {
-              path: 'environment.inside.humidity',
+              path: 'environment.ecowitt.inside.humidity',
               value: humidityin
             },
             {
-              path: 'environment.outside.pressure',
-              value: pressure
+              path: 'environment.ecowitt.outside.pressure',
+              value: baromrelin
+            },
+            {
+              path: 'environment.ecowitt.inside.relpressure',
+              value: baromrelin
+            },
+            {
+              path: 'environment.ecowitt.inside.abspressure',
+              value: baromabsin
+            },
+            {
+              path: 'environment.ecowitt.outside.temperature',
+              value: tempout
+            },
+            {
+              path: 'environment.ecowitt.outside.humidity',
+              value: humidityout
+            },
+            {
+              path: 'environment.ecowitt.outside.solarradiation',
+              value: solarradiationout
+            },
+            {
+              path: 'environment.ecowitt.outside.uv',
+              value: uvout
+             },
+            {
+              path: 'environment.ecowitt.outside.rrain_piezo',
+              value: rrain_piezoout
+            },
+            {
+              path: 'environment.ecowitt.outside.drain_piezo',
+              value: drain_piezoout
             }
           ];
 
+
           for (let i=1;i<=3;i++) {
             let tempKey = 'temp' + i.toString() + 'f';
+                app.debug("tempKey " + tempKey);
             let humidityKey = 'humidity' + i.toString();
+                app.debug("humidityKey " + humidityKey);
             if (tempKey in q) {
               var temp = fahrenheit2kelvin(parseFloat(q[tempKey]));
+              app.debug("temp " + temp);
               eval ('var key=options.temp' + i.toString());
               if (key) {
                 values.push ({
@@ -98,9 +152,7 @@ module.exports = function (app) {
 
           if ('windspeedmph' in q) {
             var windSpeed = mph2mps (parseFloat (q.windspeedmph));
-            var path = 'environment.wind.speedTrue';
-            if (options.windTrue == false) 
-              path = 'environment.wind.speedApparent'; 
+              var path = 'environment.wind.speedApparent';
             values.push ({
               path: path,
               value: windSpeed
@@ -109,9 +161,7 @@ module.exports = function (app) {
 
           if ('winddir' in q) {
             var windDirection = degrees2radians (parseFloat (q.winddir));
-            var path = 'environment.wind.directionTrue';
-            if (options.windTrue == false)
-              path = 'environment.wind.angleApparent';;
+            var  path = 'environment.wind.angleApparent';;
             values.push ({
               path: path,
               value: windDirection
@@ -127,10 +177,10 @@ module.exports = function (app) {
           });
         });
       } else {
-        res.end(); 
+        res.end();
       }
     });
-    server.listen(options.port); 
+    server.listen(options.port);
   };
 
   plugin.stop = function () {
@@ -146,43 +196,69 @@ module.exports = function (app) {
         title: 'Server Port',
         default: 1923
       },
-      windTrue: {
-        type: 'boolean',
-        title: 'Use true wind speed and direction (as opposed to apparent)',
-        default: true
+      tempinf: {
+        type: 'string',
+        title: 'signalk key for gw2000 internal temperature',
+        default: 'environment.ecowitt.inside.temperature'
+      },
+      humidityin: {
+        type: 'string',
+        title: 'signalk key for gw2000 internal humidity',
+        default: 'environment.ecowitt.inside.humidity'
+      },
+      baromrelin: {
+        type: 'string',
+        title: 'signalk key for gw2000 internal relative pressure',
+        default: 'environment.ecowitt.inside.relpressure'
+      },
+      baromabsin: {
+        type: 'string',
+        title: 'signalk key for gw2000 internal absolute pressure',
+        default: 'environment.ecowitt.inside.abspressure'
+      },
+      tempf: {
+        type: 'string',
+        title: 'signalk key for gw2000 external temperature',
+    default: 'environment.ecowitt.outside.temperature'
+      },
+      humidity: {
+        type: 'string',
+        title: 'signalk key for gw2000 external humidity',
+        default: 'environment.ecowitt.outside.humidity'
       },
       temp1: {
         type: 'string',
-        title: 'SignalK key for Channel-1 temperature',
-        default: 'environment.outside.temperature'
+        title: 'SignalK key for CH1 temperature',
+        default: 'environment.ecowitt.1.temperature'
       },
       humidity1: {
         type: 'string',
-        title: 'SignalK key for Channel-1 humidity',
-        default: 'environment.outside.humidity'
+        title: 'SignalK key for CH1 humidity',
+        default: 'environment.ecowitt.1.humidity'
       },
       temp2: {
         type: 'string',
-        title: 'SignalK key for Channel-2 temperature',
-        default: 'environment.mainCabin.temperature'
+        title: 'SignalK key for CH2 temperature',
+        default: 'environment.ecowitt.2.temperature'
       },
       humidity2: {
         type: 'string',
-        title: 'SignalK key for Channel-2 humidity',
-        default: 'environment.mainCabin.humidity'
+        title: 'SignalK key for CH2 humidity',
+        default: 'environment.ecowitt.2.humidity'
       },
       temp3: {
         type: 'string',
-        title: 'SignalK key for Channel-3 temperature',
-        default: 'environment.refrigerator.temperature'
+        title: 'SignalK key for CH3 temperature',
+        default: 'environment.ecowitt.3.temperature'
       },
       humidity3: {
         type: 'string',
-        title: 'SignalK key for Channel-3 humidity',
-        default: 'environment.refrigerator.humidity'
+        title: 'SignalK key for CH3 humidity',
+        default: 'environment.ecowitt.3.humidity'
       }
     }
   };
 
   return plugin;
 };
+
